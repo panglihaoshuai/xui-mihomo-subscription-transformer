@@ -1,8 +1,12 @@
 import importlib.util
+import http.client
 import json
 import pathlib
 import tempfile
+import threading
 import unittest
+from http.server import ThreadingHTTPServer
+from unittest import mock
 
 
 ROOT = pathlib.Path(__file__).parents[1]
@@ -47,6 +51,60 @@ class TransformProfileTest(unittest.TestCase):
         self.assertEqual(["US VLESS"], auto["proxies"])
         self.assertNotIn("tolerance", auto)
 
+    def test_builds_domain_specific_service_group_without_direct_fallback(self):
+        result = MODULE.transform_profile(
+            self.source,
+            {
+                "service_groups": [
+                    {
+                        "name": "OPENAI",
+                        "group_type": "url-test",
+                        "domains": ["chatgpt.com", "openai.com"],
+                        "node_exclude": "VLESS",
+                        "health_check": {
+                            "url": "https://chatgpt.com/cdn-cgi/trace",
+                            "interval": 60,
+                            "expected_status": 200,
+                        },
+                    }
+                ]
+            },
+        )
+
+        groups = {group["name"]: group for group in result["proxy-groups"]}
+        openai = groups["OPENAI"]
+        self.assertEqual("url-test", openai["type"])
+        self.assertEqual(["US Hysteria2", "JP VMess"], openai["proxies"])
+        self.assertNotIn("DIRECT", openai["proxies"])
+        self.assertEqual("https://chatgpt.com/cdn-cgi/trace", openai["url"])
+        self.assertEqual(200, openai["expected-status"])
+        self.assertEqual(
+            ["DOMAIN-SUFFIX,chatgpt.com,OPENAI", "DOMAIN-SUFFIX,openai.com,OPENAI"],
+            result["rules"][:2],
+        )
+
+    def test_overseas_dns_uses_non_direct_auto_group(self):
+        result = MODULE.transform_profile(
+            self.source,
+            {"group_names": {"auto": "FAST", "manual": "PICK", "proxy": "OUTBOUND"}},
+        )
+
+        self.assertEqual(
+            [
+                "https://1.1.1.1/dns-query#FAST",
+                "https://8.8.8.8/dns-query#FAST",
+            ],
+            result["dns"]["nameserver"],
+        )
+        self.assertEqual("MATCH,OUTBOUND", result["rules"][-1])
+
+    def test_rejects_service_group_name_conflicts(self):
+        with self.assertRaisesRegex(ValueError, "service group name"):
+            MODULE.transform_profile(
+                self.source,
+                {"service_groups": [{"name": "AUTO", "domains": ["chatgpt.com"]}]},
+            )
+
     def test_rejects_profiles_without_selected_nodes(self):
         with self.assertRaisesRegex(ValueError, "selected no proxies"):
             MODULE.transform_profile(self.source, {"node_include": "does-not-match"})
@@ -70,9 +128,76 @@ class ConfigTest(unittest.TestCase):
         self.assertEqual("http://localhost:2096", upstream)
         self.assertEqual("fallback", routes["/clash/example"]["policy"]["group_type"])
 
+    def test_applies_default_policy_to_legacy_string_routes(self):
+        _, routes = self._load(
+            {
+                "upstream": "http://127.0.0.1:2096",
+                "default_policy": "smart",
+                "paths": {"/clash/example": "/clash/token"},
+                "policies": {"smart": {"group_type": "url-test"}},
+            }
+        )
+        self.assertEqual("url-test", routes["/clash/example"]["policy"]["group_type"])
+
     def test_rejects_non_loopback_upstream(self):
         with self.assertRaisesRegex(ValueError, "loopback"):
             self._load({"upstream": "http://198.51.100.1:2096", "paths": {"/clash/a": "/clash/a"}})
+
+
+class HttpHandlerTest(unittest.TestCase):
+    def test_serves_transformed_yaml_and_preserves_usage_header(self):
+        class FakeResponse:
+            headers = {"Subscription-Userinfo": "upload=1; download=2; total=3"}
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def read(self):
+                return b"proxies:\n  - name: test-node\n    type: vmess\n"
+
+        routes = {
+            "/clash/example": {
+                "upstream_path": "/clash/token",
+                "policy": {
+                    "service_groups": [
+                        {
+                            "name": "OPENAI",
+                            "domains": ["chatgpt.com"],
+                            "health_check": {
+                                "url": "https://chatgpt.com/cdn-cgi/trace",
+                                "expected_status": 200,
+                            },
+                        }
+                    ]
+                },
+            }
+        }
+        server = ThreadingHTTPServer(
+            ("127.0.0.1", 0), MODULE.create_handler("http://127.0.0.1:2096", routes)
+        )
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            with mock.patch.object(MODULE.urllib.request, "urlopen", return_value=FakeResponse()):
+                connection = http.client.HTTPConnection("127.0.0.1", server.server_port, timeout=5)
+                connection.request("GET", "/clash/example")
+                response = connection.getresponse()
+                body = response.read().decode("utf-8")
+                self.assertEqual(200, response.status)
+                self.assertEqual(
+                    "upload=1; download=2; total=3",
+                    response.getheader("Subscription-Userinfo"),
+                )
+                self.assertIn("name: OPENAI", body)
+                self.assertIn("DOMAIN-SUFFIX,chatgpt.com,OPENAI", body)
+                connection.close()
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=5)
 
 
 if __name__ == "__main__":
