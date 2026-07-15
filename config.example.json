@@ -1,0 +1,40 @@
+{
+  "upstream": "http://127.0.0.1:2096",
+  "paths": {
+    "/clash/example": {
+      "upstream_path": "/clash/REPLACE_WITH_3XUI_SUBSCRIPTION_TOKEN",
+      "policy": "smart"
+    },
+    "/clash/failover-example": {
+      "upstream_path": "/clash/REPLACE_WITH_ANOTHER_3XUI_SUBSCRIPTION_TOKEN",
+      "policy": "resilient"
+    }
+  },
+  "policies": {
+    "smart": {
+      "group_type": "url-test",
+      "node_include": ".*",
+      "health_check": {
+        "url": "https://www.gstatic.com/generate_204",
+        "interval": 10,
+        "timeout": 5000,
+        "tolerance": 100,
+        "lazy": false,
+        "expected_status": 204,
+        "max_failed_times": 1
+      }
+    },
+    "resilient": {
+      "group_type": "fallback",
+      "node_exclude": "(?i)expired|disabled",
+      "health_check": {
+        "url": "https://www.gstatic.com/generate_204",
+        "interval": 30,
+        "timeout": 5000,
+        "lazy": false,
+        "expected_status": 204,
+        "max_failed_times": 1
+      }
+    }
+  }
+}

@@ -1,0 +1,36 @@
+[Unit]
+Description=3X-UI Mihomo subscription transformer
+After=network-online.target x-ui.service
+Wants=network-online.target
+Requires=x-ui.service
+
+[Service]
+Type=simple
+User=xui-subscription
+Group=xui-subscription
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart=/usr/bin/python3 /usr/local/libexec/xui_mihomo_subscription.py --config /etc/xui-mihomo-subscription.json --listen 127.0.0.1 --port 18082
+Restart=on-failure
+RestartSec=2
+TimeoutStartSec=10
+TimeoutStopSec=10
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectClock=true
+ProtectControlGroups=true
+ProtectHostname=true
+ProtectKernelLogs=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictNamespaces=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+CapabilityBoundingSet=
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target
