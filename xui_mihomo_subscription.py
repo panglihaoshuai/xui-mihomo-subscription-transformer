@@ -41,8 +41,8 @@ DEFAULT_DNS = {
     ],
     "default-nameserver": ["1.1.1.1", "8.8.8.8"],
     "nameserver": [
-        "https://1.1.1.1/dns-query#PROXY",
-        "https://8.8.8.8/dns-query#PROXY",
+        "https://1.1.1.1/dns-query#AUTO",
+        "https://8.8.8.8/dns-query#AUTO",
     ],
     "nameserver-policy": {
         "geosite:cn": [
@@ -87,6 +87,16 @@ def deep_merge(base, override):
         else:
             result[key] = copy.deepcopy(value)
     return result
+
+
+def _replace_auto_dns_tag(value, auto_name):
+    if isinstance(value, dict):
+        return {key: _replace_auto_dns_tag(item, auto_name) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_replace_auto_dns_tag(item, auto_name) for item in value]
+    if isinstance(value, str) and value.endswith("#AUTO"):
+        return value[:-5] + f"#{auto_name}"
+    return copy.deepcopy(value)
 
 
 def _selected_names(proxies, policy):
@@ -157,10 +167,48 @@ def transform_profile(source, policy=None):
     if any(name in {auto_name, manual_name, proxy_name} for name in names):
         raise ValueError("proxy name conflicts with generated group name")
 
+    service_groups = policy.get("service_groups", [])
+    if not isinstance(service_groups, list):
+        raise ValueError("service_groups must be a list")
+    reserved_group_names = {auto_name, manual_name, proxy_name}
+    generated_service_groups = []
+    service_rules = []
+    for service in service_groups:
+        if not isinstance(service, dict):
+            raise ValueError("each service group must be an object")
+        service_name = service.get("name")
+        if not isinstance(service_name, str) or not service_name:
+            raise ValueError("service group name must be a non-empty string")
+        if service_name in reserved_group_names or service_name in names:
+            raise ValueError("service group name conflicts with another group or proxy")
+        reserved_group_names.add(service_name)
+
+        domains = service.get("domains")
+        if not isinstance(domains, list) or not domains:
+            raise ValueError("service group domains must be a non-empty list")
+        normalized_domains = []
+        for domain in domains:
+            if not isinstance(domain, str):
+                raise ValueError("service group domains must contain strings")
+            normalized = domain.removeprefix("+.").lower()
+            if not re.fullmatch(r"[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?", normalized):
+                raise ValueError(f"invalid service group domain: {domain}")
+            normalized_domains.append(normalized)
+
+        service_names = _selected_names(proxies, service)
+        generated_service_groups.append(
+            _health_group(service_name, service_names, service)
+        )
+        service_rules.extend(
+            f"DOMAIN-SUFFIX,{domain},{service_name}" for domain in normalized_domains
+        )
+
     result = {
         "mode": "rule",
         "tun": deep_merge(DEFAULT_TUN, policy.get("tun")),
-        "dns": deep_merge(DEFAULT_DNS, policy.get("dns")),
+        "dns": deep_merge(
+            _replace_auto_dns_tag(DEFAULT_DNS, auto_name), policy.get("dns")
+        ),
     }
     for key, value in source.items():
         if key not in {"mode", "tun", "dns", "proxy-groups", "rules"}:
@@ -168,6 +216,7 @@ def transform_profile(source, policy=None):
 
     result["proxy-groups"] = [
         _health_group(auto_name, names, policy),
+        *generated_service_groups,
         {
             "name": manual_name,
             "type": "select",
@@ -183,6 +232,7 @@ def transform_profile(source, policy=None):
     rules = copy.deepcopy(policy.get("rules", DEFAULT_RULES))
     if not isinstance(rules, list) or not all(isinstance(rule, str) for rule in rules):
         raise ValueError("rules must be a list of strings")
+    rules = service_rules + rules
     if not rules or rules[-1] != f"MATCH,{proxy_name}":
         rules = [rule for rule in rules if not rule.startswith("MATCH,")]
         rules.append(f"MATCH,{proxy_name}")
@@ -206,17 +256,22 @@ def load_config(path):
     upstream = _validate_upstream(config.get("upstream", ""))
     paths = config.get("paths")
     policies = config.get("policies", {})
+    default_policy_name = config.get("default_policy")
     if not isinstance(paths, dict) or not paths:
         raise ValueError("paths must be a non-empty object")
     if not isinstance(policies, dict):
         raise ValueError("policies must be an object")
+    if default_policy_name is not None and (
+        not isinstance(default_policy_name, str) or default_policy_name not in policies
+    ):
+        raise ValueError("default_policy must reference a configured policy")
 
     routes = {}
     for public_path, route in paths.items():
         if not isinstance(public_path, str) or not public_path.startswith("/clash/"):
             raise ValueError("all public paths must start with /clash/")
         if isinstance(route, str):
-            upstream_path, policy_name = route, None
+            upstream_path, policy_name = route, default_policy_name
         elif isinstance(route, dict):
             upstream_path = route.get("upstream_path")
             policy_name = route.get("policy")

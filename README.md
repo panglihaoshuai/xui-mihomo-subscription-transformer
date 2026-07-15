@@ -49,9 +49,12 @@ python3 /usr/local/libexec/xui_mihomo_subscription.py --config /etc/xui-mihomo-s
 - `node_include` / `node_exclude`: Python 正则，匹配节点名称。
 - `group_type`: `url-test`、`fallback` 或 `load-balance`。
 - `health_check`: URL、周期、超时、容差和失败阈值。
+- `service_groups`: 为 OpenAI 等目标建立独立健康检查和强制代理规则；该组只包含代理节点，不包含 `DIRECT`。
 - `dns` / `tun` / `rules`: 覆盖默认的 Mihomo 块。
 
-默认规则会让私有网络和中国大陆域名/IP 直连，其他流量走 `PROXY`。海外 DoH 请求显式通过 `PROXY`，避免本地网络看到明文海外 DNS 查询。应用自行使用 DoH/DoT 或 Android Private DNS 时，可能绕过 TUN 的 53 端口劫持。
+`default_policy` 可将同一策略应用到旧版字符串路径映射，不需要重写已有订阅令牌。默认规则会让私有网络和中国大陆域名/IP 直连，其他流量走 `PROXY`。海外 DoH 请求固定通过不含 `DIRECT` 的自动组，避免本地网络看到明文海外 DNS 查询。应用自行使用 DoH/DoT 或 Android Private DNS 时，可能绕过 TUN 的 53 端口劫持。
+
+示例中的 `OPENAI` 组使用 ChatGPT 的轻量 HTTPS 路径检查真实目标链路，并在通用规则之前强制匹配 [OpenAI 官方网络清单](https://help.openai.com/en/articles/9247338-network-recommendations-for-chatgpt-errors-on-web-and-apps)中的相关域名。健康检查设为惰性执行，只有使用该组时才持续检查，避免无意义的后台探测。
 
 ## 验证
 

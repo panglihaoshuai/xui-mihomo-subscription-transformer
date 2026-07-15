@@ -1,5 +1,6 @@
 {
   "upstream": "http://127.0.0.1:2096",
+  "default_policy": "smart",
   "paths": {
     "/clash/example": {
       "upstream_path": "/clash/REPLACE_WITH_3XUI_SUBSCRIPTION_TOKEN",
@@ -22,7 +23,41 @@
         "lazy": false,
         "expected_status": 204,
         "max_failed_times": 1
-      }
+      },
+      "service_groups": [
+        {
+          "name": "OPENAI",
+          "group_type": "url-test",
+          "domains": [
+            "chatgpt.com",
+            "openai.com",
+            "oaistatic.com",
+            "oaiusercontent.com",
+            "oaistatsig.com",
+            "openaimerge.com",
+            "ct.sendgrid.net",
+            "intercom.io",
+            "intercomcdn.com",
+            "workos.com",
+            "workoscdn.com",
+            "challenges.cloudflare.com",
+            "humb.apple.com",
+            "stripe.com",
+            "sentry.io",
+            "datadoghq.com",
+            "imgix.net"
+          ],
+          "health_check": {
+            "url": "https://chatgpt.com/cdn-cgi/trace",
+            "interval": 60,
+            "timeout": 10000,
+            "tolerance": 150,
+            "lazy": true,
+            "expected_status": 200,
+            "max_failed_times": 1
+          }
+        }
+      ]
     },
     "resilient": {
       "group_type": "fallback",
