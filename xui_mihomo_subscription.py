@@ -99,28 +99,56 @@ def _replace_auto_dns_tag(value, auto_name):
     return copy.deepcopy(value)
 
 
-def _selected_names(proxies, policy):
+def _protocol_types(policy, key):
+    values = policy.get(key)
+    if values is None:
+        return None
+    if not isinstance(values, list) or not all(
+        isinstance(value, str) and value for value in values
+    ):
+        raise ValueError(f"{key} must be a list of non-empty strings")
+    return {value.lower() for value in values}
+
+
+def _selected_proxies(proxies, policy):
     include = policy.get("node_include")
     exclude = policy.get("node_exclude")
     include_re = re.compile(include) if include else None
     exclude_re = re.compile(exclude) if exclude else None
+    include_types = _protocol_types(policy, "node_include_types")
+    exclude_types = _protocol_types(policy, "node_exclude_types") or set()
 
-    names = []
+    selected = []
     for proxy in proxies:
         name = proxy.get("name") if isinstance(proxy, dict) else None
         if not isinstance(name, str) or not name:
             raise ValueError("profile contains a proxy without a name")
+        proxy_type = proxy.get("type")
+        if (include_types is not None or exclude_types) and (
+            not isinstance(proxy_type, str) or not proxy_type
+        ):
+            raise ValueError("profile contains a proxy without a type")
         if include_re and not include_re.search(name):
             continue
         if exclude_re and exclude_re.search(name):
             continue
-        names.append(name)
+        normalized_type = proxy_type.lower() if isinstance(proxy_type, str) else None
+        if include_types is not None and normalized_type not in include_types:
+            continue
+        if normalized_type in exclude_types:
+            continue
+        selected.append(proxy)
 
-    if not names:
+    if not selected:
         raise ValueError("policy selected no proxies")
+    names = [proxy["name"] for proxy in selected]
     if len(names) != len(set(names)):
         raise ValueError("profile contains duplicate proxy names")
-    return names
+    return selected
+
+
+def _selected_names(proxies, policy):
+    return [proxy["name"] for proxy in _selected_proxies(proxies, policy)]
 
 
 def _health_group(name, proxy_names, policy):
@@ -148,13 +176,14 @@ def _health_group(name, proxy_names, policy):
 
 
 def transform_profile(source, policy=None):
-    """Build a Mihomo profile while preserving all upstream proxy definitions."""
+    """Build a Mihomo profile while preserving policy-selected proxy definitions."""
     policy = policy or {}
     proxies = source.get("proxies") if isinstance(source, dict) else None
     if not isinstance(proxies, list) or not proxies:
         raise ValueError("profile contains no proxies")
 
-    names = _selected_names(proxies, policy)
+    selected_proxies = _selected_proxies(proxies, policy)
+    names = [proxy["name"] for proxy in selected_proxies]
     group_names = deep_merge(
         {"auto": "AUTO", "manual": "MANUAL", "proxy": "PROXY"},
         policy.get("group_names"),
@@ -206,7 +235,7 @@ def transform_profile(source, policy=None):
                 raise ValueError(f"invalid service group domain: {domain}")
             normalized_domains.append(normalized)
 
-        service_names = _selected_names(proxies, service)
+        service_names = _selected_names(selected_proxies, service)
         generated_service_groups.append(
             _health_group(service_name, service_names, service)
         )
@@ -222,8 +251,9 @@ def transform_profile(source, policy=None):
         ),
     }
     for key, value in source.items():
-        if key not in {"mode", "tun", "dns", "proxy-groups", "rules"}:
+        if key not in {"mode", "tun", "dns", "proxies", "proxy-groups", "rules"}:
             result[key] = copy.deepcopy(value)
+    result["proxies"] = copy.deepcopy(selected_proxies)
 
     auto_group = _health_group(auto_name, names, policy)
     if group_layout == "simple":
