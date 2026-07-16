@@ -162,15 +162,26 @@ def transform_profile(source, policy=None):
     auto_name = group_names["auto"]
     manual_name = group_names["manual"]
     proxy_name = group_names["proxy"]
-    if len({auto_name, manual_name, proxy_name}) != 3:
+    group_layout = policy.get("group_layout", "three-tier")
+    if group_layout not in {"three-tier", "simple"}:
+        raise ValueError(f"unsupported group_layout: {group_layout}")
+    generated_group_names = (
+        {auto_name, manual_name, proxy_name}
+        if group_layout == "three-tier"
+        else {auto_name, manual_name}
+    )
+    expected_group_count = 3 if group_layout == "three-tier" else 2
+    if len(generated_group_names) != expected_group_count:
         raise ValueError("group_names must be unique")
-    if any(name in {auto_name, manual_name, proxy_name} for name in names):
+    if any(name in generated_group_names for name in names):
         raise ValueError("proxy name conflicts with generated group name")
 
     service_groups = policy.get("service_groups", [])
     if not isinstance(service_groups, list):
         raise ValueError("service_groups must be a list")
-    reserved_group_names = {auto_name, manual_name, proxy_name}
+    if group_layout == "simple" and service_groups:
+        raise ValueError("simple group_layout does not support service_groups")
+    reserved_group_names = set(generated_group_names)
     generated_service_groups = []
     service_rules = []
     for service in service_groups:
@@ -214,28 +225,41 @@ def transform_profile(source, policy=None):
         if key not in {"mode", "tun", "dns", "proxy-groups", "rules"}:
             result[key] = copy.deepcopy(value)
 
-    result["proxy-groups"] = [
-        _health_group(auto_name, names, policy),
-        *generated_service_groups,
-        {
-            "name": manual_name,
-            "type": "select",
-            "proxies": names + (["DIRECT"] if policy.get("manual_direct", True) else []),
-        },
-        {
-            "name": proxy_name,
-            "type": "select",
-            "proxies": [auto_name, manual_name, "DIRECT"],
-        },
-    ]
+    auto_group = _health_group(auto_name, names, policy)
+    if group_layout == "simple":
+        manual_proxies = [auto_name] + names
+        if policy.get("manual_direct", False):
+            manual_proxies.append("DIRECT")
+        result["proxy-groups"] = [
+            auto_group,
+            {"name": manual_name, "type": "select", "proxies": manual_proxies},
+        ]
+        outbound_name = manual_name
+    else:
+        result["proxy-groups"] = [
+            auto_group,
+            *generated_service_groups,
+            {
+                "name": manual_name,
+                "type": "select",
+                "proxies": names
+                + (["DIRECT"] if policy.get("manual_direct", True) else []),
+            },
+            {
+                "name": proxy_name,
+                "type": "select",
+                "proxies": [auto_name, manual_name, "DIRECT"],
+            },
+        ]
+        outbound_name = proxy_name
 
     rules = copy.deepcopy(policy.get("rules", DEFAULT_RULES))
     if not isinstance(rules, list) or not all(isinstance(rule, str) for rule in rules):
         raise ValueError("rules must be a list of strings")
     rules = service_rules + rules
-    if not rules or rules[-1] != f"MATCH,{proxy_name}":
+    if not rules or rules[-1] != f"MATCH,{outbound_name}":
         rules = [rule for rule in rules if not rule.startswith("MATCH,")]
-        rules.append(f"MATCH,{proxy_name}")
+        rules.append(f"MATCH,{outbound_name}")
     result["rules"] = rules
     return result
 

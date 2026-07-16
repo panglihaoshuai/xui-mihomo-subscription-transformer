@@ -98,6 +98,39 @@ class TransformProfileTest(unittest.TestCase):
         )
         self.assertEqual("MATCH,OUTBOUND", result["rules"][-1])
 
+    def test_builds_simple_auto_manual_layout(self):
+        result = MODULE.transform_profile(
+            self.source,
+            {
+                "group_layout": "simple",
+                "health_check": {
+                    "url": "https://chatgpt.com/cdn-cgi/trace",
+                    "expected_status": 200,
+                },
+            },
+        )
+
+        self.assertEqual(["AUTO", "MANUAL"], [group["name"] for group in result["proxy-groups"]])
+        auto, manual = result["proxy-groups"]
+        self.assertEqual("https://chatgpt.com/cdn-cgi/trace", auto["url"])
+        self.assertEqual(200, auto["expected-status"])
+        self.assertEqual(
+            ["AUTO", "US VLESS", "US Hysteria2", "JP VMess"],
+            manual["proxies"],
+        )
+        self.assertNotIn("DIRECT", manual["proxies"])
+        self.assertEqual("MATCH,MANUAL", result["rules"][-1])
+
+    def test_rejects_service_groups_in_simple_layout(self):
+        with self.assertRaisesRegex(ValueError, "simple group_layout"):
+            MODULE.transform_profile(
+                self.source,
+                {
+                    "group_layout": "simple",
+                    "service_groups": [{"name": "OPENAI", "domains": ["chatgpt.com"]}],
+                },
+            )
+
     def test_rejects_service_group_name_conflicts(self):
         with self.assertRaisesRegex(ValueError, "service group name"):
             MODULE.transform_profile(
