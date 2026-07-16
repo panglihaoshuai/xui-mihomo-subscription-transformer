@@ -13,61 +13,29 @@
   },
   "policies": {
     "smart": {
+      "group_layout": "simple",
       "group_type": "url-test",
       "node_include": ".*",
       "health_check": {
-        "url": "https://www.gstatic.com/generate_204",
+        "url": "https://chatgpt.com/cdn-cgi/trace",
         "interval": 10,
-        "timeout": 5000,
-        "tolerance": 100,
+        "timeout": 10000,
+        "tolerance": 150,
         "lazy": false,
-        "expected_status": 204,
+        "expected_status": 200,
         "max_failed_times": 1
-      },
-      "service_groups": [
-        {
-          "name": "OPENAI",
-          "group_type": "url-test",
-          "domains": [
-            "chatgpt.com",
-            "openai.com",
-            "oaistatic.com",
-            "oaiusercontent.com",
-            "oaistatsig.com",
-            "openaimerge.com",
-            "ct.sendgrid.net",
-            "intercom.io",
-            "intercomcdn.com",
-            "workos.com",
-            "workoscdn.com",
-            "challenges.cloudflare.com",
-            "humb.apple.com",
-            "stripe.com",
-            "sentry.io",
-            "datadoghq.com",
-            "imgix.net"
-          ],
-          "health_check": {
-            "url": "https://chatgpt.com/cdn-cgi/trace",
-            "interval": 60,
-            "timeout": 10000,
-            "tolerance": 150,
-            "lazy": true,
-            "expected_status": 200,
-            "max_failed_times": 1
-          }
-        }
-      ]
+      }
     },
     "resilient": {
+      "group_layout": "simple",
       "group_type": "fallback",
       "node_exclude": "(?i)expired|disabled",
       "health_check": {
-        "url": "https://www.gstatic.com/generate_204",
+        "url": "https://chatgpt.com/cdn-cgi/trace",
         "interval": 30,
-        "timeout": 5000,
+        "timeout": 10000,
         "lazy": false,
-        "expected_status": 204,
+        "expected_status": 200,
         "max_failed_times": 1
       }
     }
