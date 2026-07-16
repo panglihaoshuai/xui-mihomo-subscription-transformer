@@ -1,3 +1,4 @@
+import copy
 import importlib.util
 import http.client
 import json
@@ -37,6 +38,11 @@ class TransformProfileTest(unittest.TestCase):
         self.assertEqual(["any:53", "tcp://any:53"], result["tun"]["dns-hijack"])
         self.assertEqual(names, result["proxy-groups"][0]["proxies"])
         self.assertEqual("url-test", result["proxy-groups"][0]["type"])
+        self.assertEqual(
+            "https://www.gstatic.com/generate_204",
+            result["proxy-groups"][0]["url"],
+        )
+        self.assertEqual(204, result["proxy-groups"][0]["expected-status"])
         self.assertEqual(names + ["DIRECT"], result["proxy-groups"][1]["proxies"])
         self.assertEqual(["AUTO", "MANUAL", "DIRECT"], result["proxy-groups"][2]["proxies"])
         self.assertEqual("MATCH,PROXY", result["rules"][-1])
@@ -50,6 +56,42 @@ class TransformProfileTest(unittest.TestCase):
         self.assertEqual("fallback", auto["type"])
         self.assertEqual(["US VLESS"], auto["proxies"])
         self.assertNotIn("tolerance", auto)
+
+    def test_excludes_protocol_types_from_definitions_and_groups(self):
+        source = copy.deepcopy(self.source)
+        source["proxies"].append({"name": "US Shadowsocks 2022", "type": "ss"})
+        result = MODULE.transform_profile(
+            source,
+            {"group_layout": "simple", "node_exclude_types": ["SS"]},
+        )
+
+        emitted_names = [proxy["name"] for proxy in result["proxies"]]
+        self.assertEqual(
+            ["US VLESS", "US Hysteria2", "JP VMess"],
+            emitted_names,
+        )
+        self.assertEqual(emitted_names, result["proxy-groups"][0]["proxies"])
+        self.assertEqual(
+            ["AUTO", *emitted_names],
+            result["proxy-groups"][1]["proxies"],
+        )
+
+    def test_includes_only_selected_protocol_types(self):
+        source = copy.deepcopy(self.source)
+        source["proxies"].append({"name": "US Shadowsocks 2022", "type": "ss"})
+        result = MODULE.transform_profile(
+            source,
+            {"node_include_types": ["VLESS", "vmess"]},
+        )
+
+        self.assertEqual(
+            ["US VLESS", "JP VMess"],
+            [proxy["name"] for proxy in result["proxies"]],
+        )
+
+    def test_rejects_invalid_protocol_type_filters(self):
+        with self.assertRaisesRegex(ValueError, "node_exclude_types"):
+            MODULE.transform_profile(self.source, {"node_exclude_types": "ss"})
 
     def test_builds_domain_specific_service_group_without_direct_fallback(self):
         result = MODULE.transform_profile(

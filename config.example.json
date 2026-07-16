@@ -1,41 +1,41 @@
 {
   "upstream": "http://127.0.0.1:2096",
-  "default_policy": "smart",
+  "default_policy": "user-smart",
   "paths": {
-    "/clash/example": {
+    "/clash/admin-example": {
       "upstream_path": "/clash/REPLACE_WITH_3XUI_SUBSCRIPTION_TOKEN",
-      "policy": "smart"
+      "policy": "admin-smart"
     },
-    "/clash/failover-example": {
+    "/clash/user-example": {
       "upstream_path": "/clash/REPLACE_WITH_ANOTHER_3XUI_SUBSCRIPTION_TOKEN",
-      "policy": "resilient"
+      "policy": "user-smart"
     }
   },
   "policies": {
-    "smart": {
+    "admin-smart": {
       "group_layout": "simple",
       "group_type": "url-test",
-      "node_include": ".*",
       "health_check": {
-        "url": "https://chatgpt.com/cdn-cgi/trace",
+        "url": "https://www.gstatic.com/generate_204",
         "interval": 10,
-        "timeout": 10000,
-        "tolerance": 150,
+        "timeout": 5000,
+        "tolerance": 100,
         "lazy": false,
-        "expected_status": 200,
+        "expected_status": 204,
         "max_failed_times": 1
       }
     },
-    "resilient": {
+    "user-smart": {
       "group_layout": "simple",
-      "group_type": "fallback",
-      "node_exclude": "(?i)expired|disabled",
+      "group_type": "url-test",
+      "node_exclude_types": ["ss"],
       "health_check": {
-        "url": "https://chatgpt.com/cdn-cgi/trace",
-        "interval": 30,
-        "timeout": 10000,
+        "url": "https://www.gstatic.com/generate_204",
+        "interval": 10,
+        "timeout": 5000,
+        "tolerance": 100,
         "lazy": false,
-        "expected_status": 200,
+        "expected_status": 204,
         "max_failed_times": 1
       }
     }

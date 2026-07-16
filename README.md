@@ -9,7 +9,7 @@
 - 多订阅路径可映射到不同上游订阅与策略。
 - 节点名在每次拉取时动态读取，不依赖面板中的固定名称。
 - `url-test`、`fallback` 和 `load-balance` 自动组策略。
-- 节点名称正则筛选，便于按协议或地区构建订阅。
+- 节点名称正则和协议类型筛选，可为不同订阅限制可见协议。
 - 默认提供 TUN、Fake-IP、加密 DoH、国内直连和海外代理 DNS 策略。
 - 透传 `Subscription-Userinfo`、`Profile-Update-Interval` 等 3X-UI 响应头。
 - 仅接受环回地址上游，适合由 Nginx/Caddy 公开暴露订阅地址。
@@ -39,14 +39,15 @@ python3 /usr/local/libexec/xui_mihomo_subscription.py --config /etc/xui-mihomo-s
 
 ## 配置
 
-`config.example.json` 包含两个策略：
+`config.example.json` 包含两个 `url-test` 策略：
 
-- `smart`: `url-test` 自动选择最低延迟节点，适合常规单用户订阅。
-- `resilient`: `fallback` 优先使用第一个健康节点，适合强调故障切换的场景。
+- `admin-smart`: 下发全部节点，自动选择健康且延迟较低的节点。
+- `user-smart`: 同样自动选优，但从最终配置中移除 Shadowsocks 节点。
 
 `paths` 的键是公开路径，值可为字符串（兼容旧格式）或对象。对象允许指定 `upstream_path` 和 `policy`。每个策略可设置：
 
 - `node_include` / `node_exclude`: Python 正则，匹配节点名称。
+- `node_include_types` / `node_exclude_types`: 不区分大小写的协议类型列表，例如 `["ss"]`。过滤同时作用于顶层 `proxies` 和所有生成组，避免节点从客户端内置全局组绕过限制。
 - `group_type`: `url-test`、`fallback` 或 `load-balance`。
 - `group_layout`: `simple` 只生成 `AUTO` 和 `MANUAL`；默认的 `three-tier` 额外生成顶层 `PROXY`。
 - `health_check`: URL、周期、超时、容差和失败阈值。
@@ -55,7 +56,7 @@ python3 /usr/local/libexec/xui_mihomo_subscription.py --config /etc/xui-mihomo-s
 
 `default_policy` 可将同一策略应用到旧版字符串路径映射，不需要重写已有订阅令牌。默认规则会让私有网络和中国大陆域名/IP 直连，其他流量走顶层选择组。海外 DoH 请求固定通过不含 `DIRECT` 的自动组，避免本地网络看到明文海外 DNS 查询。应用自行使用 DoH/DoT 或 Android Private DNS 时，可能绕过 TUN 的 53 端口劫持。
 
-示例使用简化布局：`AUTO` 通过 ChatGPT 的轻量 HTTPS 路径检查所有节点，`MANUAL` 默认选择 `AUTO`，也可手动选择任一节点。代理目标没有 `DIRECT` 选项，国内网站仍由规则自动直连。
+示例使用简化布局：`AUTO` 每 10 秒通过中立的 `https://www.gstatic.com/generate_204` 检查线路可用性和延迟，不访问 OpenAI；`MANUAL` 默认选择 `AUTO`，也可手动选择任一获准节点。代理目标没有 `DIRECT` 选项，国内网站仍由规则自动直连。健康检查只负责选路，TLS 证书由客户端按目标网站正常验证，转换器不会拦截或替换证书。
 
 ## 验证
 
